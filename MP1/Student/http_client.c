@@ -1,3 +1,5 @@
+// CITATION: several code snippets taken from cs241 Nonstop Networking MP
+
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -22,17 +24,22 @@
 void *get_in_addr(struct sockaddr *sa);
 void send_GET(char *remote, int sock_fd);
 void handle_GET(int sock_fd);
-void handle_server_response(char *method, char *local, int sock_fd);
+void handle_server_response(int sock_fd);
 size_t binary_data_network_read(int in_fd, int out_fd);
+size_t network_read_one_line(int sock_fd, char *buffer, size_t buffer_size);
 size_t network_write(int sock_fd, void *buffer, size_t len);
 int connect_to_server(char *host, char *port);
 void print_invalid_response();
 void print_connection_closed();
+void print_no_connection();
 
-static char* INVALID_PROTOCOL = "INVALIDPROTOCOL";
-static char* NO_CONNECTION = "NOCONNECTION";
+static char *INVALID_PROTOCOL = "INVALIDPROTOCOL";
+static char *NO_CONNECTION = "NOCONNECTION";
+static char *FILE_NOT_FOUND = "FILENOTFOUND";
 
 int out_fd;
+static char *host = NULL;
+static char *port = NULL;
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -45,30 +52,31 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 int main(int argc, char **argv) {
-    out_fd = open("output", O_WRONLY | O_CREAT, 0777);
+    out_fd = open("output", O_CREAT|O_WRONLY|O_TRUNC, 0777);
 
     // first argument
     char *input = argv[1];
-    fprintf(stderr, "input: %s\n", input);
+    // fprintf(stderr, "input: %s\n", input);
 
     // protocol specified is not HTTP    
     char *HTTP_PROTOCOL = "http://";
-    if (strncmp(HTTP_PROTOCOL, input, strlen(HTTP_PROTOCOL) != 0)) {
+    if (strncmp(HTTP_PROTOCOL, input, strlen(HTTP_PROTOCOL)) != 0) {
+        fprintf(stderr, "%s\n", INVALID_PROTOCOL);
         write(out_fd, INVALID_PROTOCOL, strlen(INVALID_PROTOCOL));
-    }    
+        exit(1);
+    }
 
     //get hostname & port
     char *host_port_path = input + strlen(HTTP_PROTOCOL);
     char *path = strchr(host_port_path, '/');
     char *host_port = strndup(host_port_path, path - host_port_path); // NEW
-    char *host = NULL;
-    char *port = NULL;
     char *host_port_colon = strchr(host_port, ':');
     if (host_port_colon) {
         host = strndup(host_port, host_port_colon - host_port); // NEW
         port = port = strndup(host_port_colon + 1, path - host_port_colon); // NEW
     } else {
         host = host_port;
+        port = "80";
     }
 
     // connext to server
@@ -81,7 +89,7 @@ int main(int argc, char **argv) {
     // shutdown socket
     shutdown(sock_fd, SHUT_WR);
 
-    handle_GET(sock_fd);
+    handle_server_response(sock_fd);
 
     close(sock_fd);
     close(out_fd);
@@ -90,13 +98,30 @@ int main(int argc, char **argv) {
 void send_GET(char *remote, int sock_fd) {
     #define BUFFER_SIZE 1024
     char buffer[BUFFER_SIZE];
-    sprintf(buffer, "GET %s\n", remote);
+    sprintf(buffer, "GET %s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", remote, host, port);
+    fprintf(stderr, "request:\n-\n%s\n-\n", buffer);
     ssize_t total = network_write(sock_fd, buffer, strlen(buffer));
     if (total == -1) { print_connection_closed(); exit(1); }
 }
 
 void handle_GET(int sock_fd) {
     size_t total = binary_data_network_read(sock_fd, out_fd);
+}
+
+void handle_server_response(int sock_fd) {
+    #define BUFFER_SIZE 1024
+    char buffer[BUFFER_SIZE]; memset(buffer, 0, BUFFER_SIZE);
+    network_read_one_line(sock_fd, buffer, BUFFER_SIZE);
+    fprintf(stderr, "response status: %s\n", buffer);
+    if (strstr(buffer, "200 OK")) {
+        while (strcmp(buffer, "\r\n") != 0) {
+            memset(buffer, 0, BUFFER_SIZE);
+            network_read_one_line(sock_fd, buffer, BUFFER_SIZE);
+        }
+        handle_GET(sock_fd);
+    } else if (strstr(buffer, "404 File not found")) {
+        write(out_fd, FILE_NOT_FOUND, strlen(FILE_NOT_FOUND));
+    }
 }
 
 size_t binary_data_network_read(int in_fd, int out_fd) {
@@ -115,6 +140,24 @@ size_t binary_data_network_read(int in_fd, int out_fd) {
     return total;
 }
 
+size_t network_read_one_line(int sock_fd, char *buffer, size_t buffer_size) {
+    // CITE: https://github-dev.cs.illinois.edu/angrave/cs241-lectures/blob/master/code/lec25/client.c
+    // CITE: https://github-dev.cs.illinois.edu/angrave/cs241-lectures/blob/master/code/lec26/tcpclient.c
+    size_t idx = 0;
+    size_t total = 0;
+    while (total < buffer_size) {
+        if (idx == buffer_size - 1) { print_invalid_response(); exit(1); }
+        ssize_t bytes = read(sock_fd, buffer + total, 1);
+        if (bytes == -1 && errno == EINTR) { continue; }
+        if (bytes == -1) { print_invalid_response(); exit(1); }
+        if (buffer[idx] == '\n') { buffer[idx + 1] = 0; break; }
+        total += bytes;
+        idx++;
+    }
+    if (buffer[idx] != '\n') { print_invalid_response(); exit(1); }
+    return total;
+}
+
 size_t network_write(int sock_fd, void *buffer, size_t len) {
     // CITE: CS 241 Lec 24
     size_t total = 0;
@@ -128,7 +171,7 @@ size_t network_write(int sock_fd, void *buffer, size_t len) {
 }
 
 int connect_to_server(char *host, char *port) {
-    fprintf(stderr, "hostname: %s\n", host);
+    fprintf(stderr, "host: %s\n", host);
     fprintf(stderr, "port: %s\n", port);
 
     int sockfd; 
@@ -142,6 +185,7 @@ int connect_to_server(char *host, char *port) {
 
 	if ((rv = getaddrinfo(host, port, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+        print_no_connection();
 		exit(1);
 	}
 
@@ -163,7 +207,7 @@ int connect_to_server(char *host, char *port) {
 	}
 
 	if (p == NULL) {
-		write(out_fd, NO_CONNECTION, strlen(NO_CONNECTION));
+        print_no_connection();
 		exit(1);
 	}
 
@@ -182,4 +226,9 @@ void print_invalid_response() {
 
 void print_connection_closed() {
     fprintf(stderr, "ERROR: connection closed");
+}
+
+void print_no_connection() {
+    fprintf(stderr, "%s\n", NO_CONNECTION);
+	write(out_fd, NO_CONNECTION, strlen(NO_CONNECTION));
 }
