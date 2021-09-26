@@ -21,14 +21,18 @@
 
 void *get_in_addr(struct sockaddr *sa);
 void send_GET(char *remote, int sock_fd);
-void handle_GET(int sock_fd, char*local);
+void handle_GET(int sock_fd);
 void handle_server_response(char *method, char *local, int sock_fd);
 size_t binary_data_network_read(int in_fd, int out_fd);
-size_t network_read(int sock_fd, void *buffer, size_t buffer_size);
-size_t network_read_one_line(int sock_fd, char *buffer, size_t buffer_size);
+size_t network_write(int sock_fd, void *buffer, size_t len);
 int connect_to_server(char *host, char *port);
+void print_invalid_response();
+void print_connection_closed();
 
-static FILE *output_fp;
+static char* INVALID_PROTOCOL = "INVALIDPROTOCOL";
+static char* NO_CONNECTION = "NOCONNECTION";
+
+int out_fd;
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -41,7 +45,7 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 int main(int argc, char **argv) {
-    output_fp = fopen("output", "w+");
+    out_fd = open("output", O_WRONLY | O_CREAT, 0777);
 
     // first argument
     char *input = argv[1];
@@ -50,19 +54,19 @@ int main(int argc, char **argv) {
     // protocol specified is not HTTP    
     char *HTTP_PROTOCOL = "http://";
     if (strncmp(HTTP_PROTOCOL, input, strlen(HTTP_PROTOCOL) != 0)) {
-        fprintf(output_fp, "INVALIDPROTOCOL");
+        write(out_fd, INVALID_PROTOCOL, strlen(INVALID_PROTOCOL));
     }    
 
     //get hostname & port
     char *host_port_path = input + strlen(HTTP_PROTOCOL);
-    char *host_port_endptr = strchr(host_port_path, '/');
-    char *host_port = strndup(host_port_path, host_port_endptr - host_port_path); // NEW
+    char *path = strchr(host_port_path, '/');
+    char *host_port = strndup(host_port_path, path - host_port_path); // NEW
     char *host = NULL;
     char *port = NULL;
-    char *host_endptr = strchr(host_port, ':');
-    if (host_endptr) {
-        host = strndup(host_port, host_endptr - host_port); // NEW
-        port = port = strndup(host_endptr + 1, host_port_endptr - host_endptr); // NEW
+    char *host_port_colon = strchr(host_port, ':');
+    if (host_port_colon) {
+        host = strndup(host_port, host_port_colon - host_port); // NEW
+        port = port = strndup(host_port_colon + 1, path - host_port_colon); // NEW
     } else {
         host = host_port;
     }
@@ -71,8 +75,56 @@ int main(int argc, char **argv) {
     int sock_fd = connect_to_server(host, port);
     fprintf(stderr, "socket fd: %d\n", sock_fd);
 
+    // send GET request
+    send_GET(path, sock_fd);
+
+    // shutdown socket
+    shutdown(sock_fd, SHUT_WR);
+
+    handle_GET(sock_fd);
+
     close(sock_fd);
-    fclose(output_fp);
+    close(out_fd);
+}
+
+void send_GET(char *remote, int sock_fd) {
+    #define BUFFER_SIZE 1024
+    char buffer[BUFFER_SIZE];
+    sprintf(buffer, "GET %s\n", remote);
+    ssize_t total = network_write(sock_fd, buffer, strlen(buffer));
+    if (total == -1) { print_connection_closed(); exit(1); }
+}
+
+void handle_GET(int sock_fd) {
+    size_t total = binary_data_network_read(sock_fd, out_fd);
+}
+
+size_t binary_data_network_read(int in_fd, int out_fd) {
+    // CITE: https://github-dev.cs.illinois.edu/angrave/cs241-lectures/blob/master/code/lec25/client.c
+    // CITE: https://github-dev.cs.illinois.edu/angrave/cs241-lectures/blob/master/code/lec26/tcpclient.c
+    char buffer[1024];
+    size_t total = 0;
+    while (true) {
+        ssize_t bytes = read(in_fd, buffer, sizeof(buffer));
+        if (bytes == -1 && errno == EINTR) { continue; }
+        if (bytes == -1) { print_invalid_response(); exit(1); }
+        if (bytes == 0) { break; }
+        total += bytes;
+        write(out_fd, buffer, bytes);
+    }
+    return total;
+}
+
+size_t network_write(int sock_fd, void *buffer, size_t len) {
+    // CITE: CS 241 Lec 24
+    size_t total = 0;
+    ssize_t r;
+    while ( total < len && (r = write(sock_fd, buffer + total, len - total)) ) {
+        if (r == -1 && errno == EINTR) { continue; }
+        if (r == -1) {  exit(1); }
+        total += r;
+    }
+    return total;
 }
 
 int connect_to_server(char *host, char *port) {
@@ -111,7 +163,7 @@ int connect_to_server(char *host, char *port) {
 	}
 
 	if (p == NULL) {
-		fprintf(output_fp, "NOCONNECTION");
+		write(out_fd, NO_CONNECTION, strlen(NO_CONNECTION));
 		exit(1);
 	}
 
@@ -122,4 +174,12 @@ int connect_to_server(char *host, char *port) {
 	freeaddrinfo(servinfo); // all done with this structure
 
     return sockfd;
+}
+
+void print_invalid_response() {
+    fprintf(stderr, "ERROR: invalid response");
+}
+
+void print_connection_closed() {
+    fprintf(stderr, "ERROR: connection closed");
 }
