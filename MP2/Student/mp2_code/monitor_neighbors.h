@@ -10,6 +10,11 @@
 #include <netdb.h>
 #include <pthread.h>
 
+//rishi
+#include <sys/time.h>
+//rishi
+
+
 extern int globalMyID;
 //last time you heard from each node. TODO: you will want to monitor this
 //in order to realize when a neighbor has gotten cut off from you.
@@ -21,11 +26,34 @@ extern int globalSocketUDP;
 extern struct sockaddr_in globalNodeAddrs[256];
 
 
+//rishi
+extern short int MAX_NODES;
+extern FILE *theLogFile;
+extern int graph[256][256];
+//rishi
+
+
+//rishi
 short int getNetOrderShort(unsigned char *buf) {
 	short int number;
 	memcpy(&number, buf, 2);
 	return ntohs(number);
 }
+
+void printNeighbors() {
+	// https://stackoverflow.com/questions/2741784/printing-a-2d-array-in-c
+    for (int i = 0; i < MAX_NODES; i++) {
+		bool firstTime = true;
+        for (int j = 0; j < MAX_NODES; j++) {
+            if (graph[i][j] >= 0) {
+				if (firstTime) { printf("Node %d: ", globalMyID); firstTime = false; }
+				printf("%d ", graph[i][j]);
+			}
+        }
+        if (!firstTime) { printf("\n"); }
+    }
+}
+//rishi
 
 
 //Yes, this is terrible. It's also terrible that, in Linux, a socket
@@ -80,24 +108,32 @@ void listenForNeighbors()
 			
 			//TODO: this node can consider heardFrom to be directly connected to it; do any such logic now.
 			
+			//rishi
+			// node id from sender of this message
+			// if from neighbor, heardFrom short int will be positive
+			// otherwise the heardFrom will remain -1
+
+			// also used to determine live nodes 
+			//rishi
+
 			//record that we heard from heardFrom just now.
 			gettimeofday(&globalLastHeartbeat[heardFrom], 0);
 		}
 		
 		//Is it a packet from the manager? (see mp2 specification for more details)
 		//send format: 'send'<4 ASCII bytes>, destID<net order 2 byte signed>, <some ASCII message>
-		if(!strncmp(recvBuf, "send", 4))
+		if(!strncmp((const char*) recvBuf, "send", 4))
 		{
 			//TODO send the requested message to the requested destination node
 			// ...
 
 			//rishi
-			printf("Received send%d%s from manager.\n", getNetOrderShort(recvBuf+4), recvBuf+6);
-			memset(recvBuf, 0, sizeof(recvBuf));
+			printNeighbors();
 			//rishi
+
 		}
 		//'cost'<4 ASCII bytes>, destID<net order 2 byte signed> newCost<net order 4 byte signed>
-		else if(!strncmp(recvBuf, "cost", 4))
+		else if(!strncmp((const char*) recvBuf, "cost", 4))
 		{
 			//TODO record the cost change (remember, the link might currently be down! in that case,
 			//this is the new cost you should treat it as having once it comes back up.)
@@ -107,6 +143,16 @@ void listenForNeighbors()
 		//TODO now check for the various types of packets you use in your own protocol
 		//else if(!strncmp(recvBuf, "your other message types", ))
 		// ... 
+		//rishi
+		// if you discover a new link, you broadcast this info to all of your neighbors
+		// as well as link failure
+		// LSA21\7,3\10,4 
+		// 2 -7 3
+		// \10 4
+		// source node
+		// seq number
+		// neighbors and edges and costs
+		//rishi
 	}
 	//(should never reach here)
 	close(globalSocketUDP);

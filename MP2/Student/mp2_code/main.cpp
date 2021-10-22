@@ -19,6 +19,12 @@ int globalSocketUDP;
 //pre-filled for sending to 10.1.1.0 - 255, port 7777
 struct sockaddr_in globalNodeAddrs[256];
 
+//rishi
+short int MAX_NODES = 256;
+FILE *theLogFile;
+int graph[256][256];
+//rishi
+
  
 int main(int argc, char** argv)
 {
@@ -48,6 +54,17 @@ int main(int argc, char** argv)
 	
 	//TODO: read and parse initial costs file. default to cost 1 if no entry for a node. file may be empty.
 	
+	//rishi
+	for (int i = 0; i < MAX_NODES; i++) {
+		for (int j = 0; j < MAX_NODES; j++) {
+			graph[i][j] = -1;
+		}
+	}
+	//rishi
+	
+	//rishi
+	theLogFile = fopen(argv[3], "w");
+	//rishi
 	
 	//socket() and bind() our socket. We will do all sendto()ing and recvfrom()ing on this one.
 	if((globalSocketUDP=socket(AF_INET, SOCK_DGRAM, 0)) < 0)
@@ -76,7 +93,4 @@ int main(int argc, char** argv)
 	
 	//good luck, have fun!
 	listenForNeighbors();
-	
-	
-	
 }
