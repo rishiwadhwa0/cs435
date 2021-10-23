@@ -25,6 +25,8 @@ FILE *theLogFile;
 int graph[256][256];
 int myNeighborGivenCosts[256];
 int givenIdsAndCosts[256];
+int lostSeqs[256];
+int formSeqs[256];
 //rishi
 
  
@@ -80,6 +82,12 @@ int main(int argc, char** argv)
 
 	// open log file for writing
 	theLogFile = fopen(argv[3], "w");
+
+	//initialize seq #s to -1
+	for (int i = 0; i < MAX_NODES; i++) {
+		lostSeqs[i] = -1;
+		formSeqs[i] = -1;
+	}
 	//rishi
 	
 	//socket() and bind() our socket. We will do all sendto()ing and recvfrom()ing on this one.

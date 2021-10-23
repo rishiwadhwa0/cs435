@@ -34,6 +34,8 @@ extern int givenIdsAndCosts[256];
 int linkFailureMax = 2000; //milliseconds
 int lostSeqNum = 0;
 int formSeqNum = 0;
+extern int lostSeqs[256];
+extern int formSeqs[256];
 //rishi
 
 
@@ -45,18 +47,18 @@ short int getNetOrderShort(unsigned char *buf) {
 }
 
 void printGraph() {
-	printf("\nGRAPH START\n");
+	fprintf(stderr, "\nGRAPH START\n");
     for (int i = 0; i < MAX_NODES; i++) {
 		bool firstTime = true;
         for (int j = 0; j < MAX_NODES; j++) {
             if (graph[i][j] >= 0) {
-				if (firstTime) { printf("Node %d: ", globalMyID); firstTime = false; }
-				printf("(%d, cost=%d) ", j, graph[i][j]);
+				if (firstTime) { fprintf(stderr, "Node %d: ", globalMyID); firstTime = false; }
+				fprintf(stderr, "(%d, cost=%d) ", j, graph[i][j]);
 			}
         }
-        if (!firstTime) { printf("\n"); }
+        if (!firstTime) { fprintf(stderr, "\n"); }
     }
-	printf("GRAPH END\n\n");
+	fprintf(stderr, "GRAPH END\n\n");
 }
 
 double calcTimeDiff(struct timeval x, struct timeval y) {
@@ -68,12 +70,21 @@ double calcTimeDiff(struct timeval x, struct timeval y) {
 	return diff / 1000; // return unit is milliseconds
 }
 
-void broadcastLost(int neighbord_id) {
-	char buf[12];
-	sprintf(buf, "lost/%hd/%d/%d", globalMyID, lostSeqNum, neighbord_id);
-	printf("%s\n", buf);
+void broadcastLost(short int neighbord_id) {
+	char buf[15];
+	sprintf(buf, "lost/%hd/%d/%hd", globalMyID, lostSeqNum, neighbord_id);
+	fprintf(stderr, "%s\n", buf);
 	// sendto(globalSocketUDP, buf, sizeof(buf), 0,
 	// 			  (struct sockaddr*)&globalNodeAddrs[neighbord_id], sizeof(globalNodeAddrs[neighbord_id]));
+	lostSeqNum++;
+}
+
+void broadcastForm(short int neighbord_id, int cost) {
+	char buf[20];
+	sprintf(buf, "form/%hd/%d/%hd/%d", globalMyID, formSeqNum, neighbord_id, cost);
+	sendto(globalSocketUDP, buf, sizeof(buf), 0,
+				  (struct sockaddr*)&globalNodeAddrs[neighbord_id], sizeof(globalNodeAddrs[neighbord_id]));
+	formSeqNum++;
 }
 
 void* broadcastIfLinkFailure(void* unusedParam) {
@@ -83,7 +94,7 @@ void* broadcastIfLinkFailure(void* unusedParam) {
 	while(1) {
 		bool linkFailure = false;
 		struct timeval now;
-		for (int i = 0; i < MAX_NODES; i++) {
+		for (short int i = 0; i < MAX_NODES; i++) {
 			if (graph[globalMyID][i] >= 0) {
 				gettimeofday(&now, 0);
 				double time_diff = calcTimeDiff(globalLastHeartbeat[i], now);
@@ -91,7 +102,6 @@ void* broadcastIfLinkFailure(void* unusedParam) {
 					graph[globalMyID][i] = -1;
 					linkFailure = true;
 					broadcastLost(i);
-					printf("timediff was %fms\n", time_diff);
 				}
 			}
 		}
@@ -152,15 +162,16 @@ void listenForNeighbors()
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
 			
 			//TODO: this node can consider heardFrom to be directly connected to it; do any such logic now.
-			//rishi
-			printf("received ping from neighbor %hd\n", heardFrom);
-			if (graph[globalMyID][heardFrom] == -1) {
-				graph[globalMyID][heardFrom] = givenIdsAndCosts[heardFrom];
-			}
-			//rishi
 
 			//record that we heard from heardFrom just now.
 			gettimeofday(&globalLastHeartbeat[heardFrom], 0);
+
+			//rishi
+			if (graph[globalMyID][heardFrom] == -1) {
+				graph[globalMyID][heardFrom] = givenIdsAndCosts[heardFrom];
+				broadcastForm(heardFrom, graph[globalMyID][heardFrom]);
+			}
+			//rishi
 		}
 		
 		//Is it a packet from the manager? (see mp2 specification for more details)
@@ -171,8 +182,7 @@ void listenForNeighbors()
 			// ...
 
 			//rishi
-			printf("Received ping from manager.\n");
-			printGraph();
+			fprintf(stderr, "Received ping from manager.\n");
 			//rishi
 
 		}
@@ -188,14 +198,11 @@ void listenForNeighbors()
 		//else if(!strncmp(recvBuf, "your other message types", ))
 		// ... 
 		//rishi
-		// if you discover a new link, you broadcast this info to all of your neighbors
-		// as well as link failure
-		// LSA21\7,3\10,4 
-		// 2 -7 3
-		// \10 4
-		// source node
-		// seq number
-		// neighbors and edges and costs
+		else if(!strncmp((const char*) recvBuf, "form", 4)) {
+			fprintf(stderr, "Received LSA: %s\n", recvBuf);
+		}
+
+		memset(recvBuf, 0, sizeof(recvBuf));
 		//rishi
 	}
 	//(should never reach here)
