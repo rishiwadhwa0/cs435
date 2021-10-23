@@ -23,6 +23,8 @@ struct sockaddr_in globalNodeAddrs[256];
 short int MAX_NODES = 256;
 FILE *theLogFile;
 int graph[256][256];
+int myNeighborGivenCosts[256];
+int givenIdsAndCosts[256];
 //rishi
 
  
@@ -55,14 +57,28 @@ int main(int argc, char** argv)
 	//TODO: read and parse initial costs file. default to cost 1 if no entry for a node. file may be empty.
 	
 	//rishi
+	// initial costs file
+	for (int i = 0; i < MAX_NODES; i++) {
+		givenIdsAndCosts[i] = 1;
+	}
+	FILE *initialCostsFile = fopen(argv[2], "r");
+	char *line = NULL; size_t len = 0;
+	short int id;
+	int cost;
+	while (getline(&line, &len, initialCostsFile) != -1) {
+		sscanf(line, "%hd %d", &id, &cost);
+		givenIdsAndCosts[id] = cost;
+	}
+	fclose(initialCostsFile);
+	
+	// create graph (i.e. adjacency matrix)
 	for (int i = 0; i < MAX_NODES; i++) {
 		for (int j = 0; j < MAX_NODES; j++) {
 			graph[i][j] = -1;
 		}
 	}
-	//rishi
-	
-	//rishi
+
+	// open log file for writing
 	theLogFile = fopen(argv[3], "w");
 	//rishi
 	
@@ -87,10 +103,13 @@ int main(int argc, char** argv)
 	}
 	
 	//start threads... feel free to add your own, and to remove the provided ones.
-	pthread_t announcerThread;
+	pthread_t announcerThread, broadCastIfLinkFailureThread;
 	pthread_create(&announcerThread, 0, announceToNeighbors, (void*)0);
 
-	
+	//rishi
+	pthread_create(&broadCastIfLinkFailureThread, 0, broadcastIfLinkFailure, (void*)0);
+	//rishi
+
 	//good luck, have fun!
 	listenForNeighbors();
 }

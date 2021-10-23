@@ -30,6 +30,10 @@ extern struct sockaddr_in globalNodeAddrs[256];
 extern short int MAX_NODES;
 extern FILE *theLogFile;
 extern int graph[256][256];
+extern int givenIdsAndCosts[256];
+int linkFailureMax = 2000; //milliseconds
+int lostSeqNum = 0;
+int formSeqNum = 0;
 //rishi
 
 
@@ -40,18 +44,59 @@ short int getNetOrderShort(unsigned char *buf) {
 	return ntohs(number);
 }
 
-void printNeighbors() {
-	// https://stackoverflow.com/questions/2741784/printing-a-2d-array-in-c
+void printGraph() {
+	printf("\nGRAPH START\n");
     for (int i = 0; i < MAX_NODES; i++) {
 		bool firstTime = true;
         for (int j = 0; j < MAX_NODES; j++) {
             if (graph[i][j] >= 0) {
 				if (firstTime) { printf("Node %d: ", globalMyID); firstTime = false; }
-				printf("%d ", graph[i][j]);
+				printf("(%d, cost=%d) ", j, graph[i][j]);
 			}
         }
         if (!firstTime) { printf("\n"); }
     }
+	printf("GRAPH END\n\n");
+}
+
+double calcTimeDiff(struct timeval x, struct timeval y) {
+	//https://www.binarytides.com/get-time-difference-in-microtime-in-c/
+	double x_ms , y_ms , diff;
+	x_ms = (double)x.tv_sec*1000000 + (double)x.tv_usec;
+	y_ms = (double)y.tv_sec*1000000 + (double)y.tv_usec;
+	diff = (double)y_ms - (double)x_ms;
+	return diff / 1000; // return unit is milliseconds
+}
+
+void broadcastLost(int neighbord_id) {
+	char buf[12];
+	sprintf(buf, "lost/%hd/%d/%d", globalMyID, lostSeqNum, neighbord_id);
+	printf("%s\n", buf);
+	// sendto(globalSocketUDP, buf, sizeof(buf), 0,
+	// 			  (struct sockaddr*)&globalNodeAddrs[neighbord_id], sizeof(globalNodeAddrs[neighbord_id]));
+}
+
+void* broadcastIfLinkFailure(void* unusedParam) {
+	struct timespec sleepFor;
+	sleepFor.tv_sec = 0;
+	sleepFor.tv_nsec = 1000 * 1000 * 1000; //1000 ms
+	while(1) {
+		bool linkFailure = false;
+		struct timeval now;
+		for (int i = 0; i < MAX_NODES; i++) {
+			if (graph[globalMyID][i] >= 0) {
+				gettimeofday(&now, 0);
+				double time_diff = calcTimeDiff(globalLastHeartbeat[i], now);
+				if (time_diff > linkFailureMax) {
+					graph[globalMyID][i] = -1;
+					linkFailure = true;
+					broadcastLost(i);
+					printf("timediff was %fms\n", time_diff);
+				}
+			}
+		}
+		nanosleep(&sleepFor, 0);
+	}
 }
 //rishi
 
@@ -100,20 +145,18 @@ void listenForNeighbors()
 		
 		inet_ntop(AF_INET, &theirAddr.sin_addr, fromAddr, 100);
 		
-		short int heardFrom = -1;
+		short int heardFrom = -1; // node id from sender of this message OR -1 if manager
 		if(strstr(fromAddr, "10.1.1."))
 		{
 			heardFrom = atoi(
 					strchr(strchr(strchr(fromAddr,'.')+1,'.')+1,'.')+1);
 			
 			//TODO: this node can consider heardFrom to be directly connected to it; do any such logic now.
-			
 			//rishi
-			// node id from sender of this message
-			// if from neighbor, heardFrom short int will be positive
-			// otherwise the heardFrom will remain -1
-
-			// also used to determine live nodes 
+			printf("received ping from neighbor %hd\n", heardFrom);
+			if (graph[globalMyID][heardFrom] == -1) {
+				graph[globalMyID][heardFrom] = givenIdsAndCosts[heardFrom];
+			}
 			//rishi
 
 			//record that we heard from heardFrom just now.
@@ -128,7 +171,8 @@ void listenForNeighbors()
 			// ...
 
 			//rishi
-			printNeighbors();
+			printf("Received ping from manager.\n");
+			printGraph();
 			//rishi
 
 		}
