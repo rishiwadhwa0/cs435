@@ -231,14 +231,19 @@ void listenForNeighbors()
 			int seq_num;
 			memcpy(&src_id, recvBuf+bufCounter, sizeof(short int)); bufCounter += sizeof(short int);
 			memcpy(&seq_num, recvBuf+bufCounter, sizeof(int)); bufCounter += sizeof(int);
-			fprintf(stderr, "%hd: src_id=%hd, seq_id=%d ", globalMyID, src_id, seq_num);
+			fprintf(stderr, "%hd: heardFrom=%hd, src_id=%hd, seq_id=%d ", globalMyID, heardFrom, src_id, seq_num);
 
 			if (seq_num > seqNums[src_id]) {
 				seqNums[src_id] = seq_num;
+
+				int copy_graph[256][256];
+				memcpy(&copy_graph, &graph, sizeof(graph));
+				
 				for (int i = 0; i < MAX_NODES; i++) {
 					graph[src_id][i] = -1;
 					graph[i][src_id] = -1;
 				}
+				
 				while (bufCounter < bytesRecvd) {
 					short int neighbor_id;
 					int cost;
@@ -249,6 +254,18 @@ void listenForNeighbors()
 					fprintf(stderr, "/ %hd,%d ", neighbor_id, cost);
 				}
 				fprintf(stderr, "\n");
+
+				for (short int i = 0; i < MAX_NODES; i++) {
+					if (i != globalMyID && i != heardFrom) {
+						sendto(globalSocketUDP, recvBuf, bytesRecvd, 0,
+							(struct sockaddr*)&globalNodeAddrs[i], sizeof(globalNodeAddrs[i]));
+					}
+				}
+
+				if (memcmp(&copy_graph, &graph, sizeof(graph)) != 0) { sendBroadcast(); }
+
+			} else {
+				fprintf(stderr, " [DISCARD]\n");
 			}
 		}
 
