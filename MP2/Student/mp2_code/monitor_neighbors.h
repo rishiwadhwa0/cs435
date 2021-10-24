@@ -12,6 +12,7 @@
 
 //rishi
 #include <sys/time.h>
+#include <set>
 //rishi
 
 
@@ -34,7 +35,8 @@ extern int givenIdsAndCosts[256];
 int linkFailureMin = 2000; //milliseconds
 int linkSuccessMax = 1000; //milliseconds
 int seqNum = 0;
-extern int seqs[256];
+extern int seqNums[256];
+std::set<int> neighbors;
 //rishi
 
 
@@ -47,13 +49,13 @@ short int getNetOrderShort(unsigned char *buf) {
 
 void printGraph() {
 	fprintf(stderr, "\nGRAPH START\n");
-    for (int i = 0; i < MAX_NODES; i++) {
+    for (short int i = 0; i < MAX_NODES; i++) {
 		bool firstTime = true;
-        for (int j = 0; j < MAX_NODES; j++) {
+        for (short int j = 0; j < MAX_NODES; j++) {
 			int cost = graph[i][j];
             if (cost >= 0) {
-				if (firstTime) { fprintf(stderr, "Node %d: ", globalMyID); firstTime = false; }
-				fprintf(stderr, "(%d, cost=%d) ", j, cost);
+				if (firstTime) { fprintf(stderr, "Node %hd: ", i); firstTime = false; }
+				fprintf(stderr, "<%hd, cost=%d> ", j, cost);
 			}
         }
         if (!firstTime) { fprintf(stderr, "\n"); }
@@ -73,18 +75,29 @@ double calcTimeDiff(struct timeval x, struct timeval y) {
 void sendBroadcast() {
 	char buf[1000];
 	memset(buf, 0, sizeof(buf));
+	// int bufCounter = 0;
+	// bufCounter += sprintf(buf, "LSA%hd,%d", globalMyID, seqNum);
+	// for (short int i = 0; i < MAX_NODES; i++) {
+	// 	int cost = graph[globalMyID][i];
+	// 	if (cost >= 0) {
+	// 		bufCounter += sprintf(buf+bufCounter, "/%hd,%d", i, cost);
+	// 	}
+	// }
 	int bufCounter = 0;
-	bufCounter += sprintf(buf, "LSA%hd,%d", globalMyID, seqNum);
+	memcpy(buf+bufCounter, "LSA", 3); bufCounter += 3;
+	memcpy(buf+bufCounter, &globalMyID, sizeof(short int)); bufCounter += sizeof(short int);
+	memcpy(buf+bufCounter, &seqNum, sizeof(int)); bufCounter += sizeof(int);
 	for (short int i = 0; i < MAX_NODES; i++) {
 		int cost = graph[globalMyID][i];
 		if (cost >= 0) {
-			bufCounter += sprintf(buf+bufCounter, "/%hd,%d", i, cost);
+			memcpy(buf+bufCounter, &i, sizeof(short int)); bufCounter += sizeof(short int);
+			memcpy(buf+bufCounter, &cost, sizeof(int)); bufCounter += sizeof(int);
 		}
 	}
 
 	for (int i = 0; i < MAX_NODES; i++) {
 		if (graph[globalMyID][i] >= 0) {
-			sendto(globalSocketUDP, buf, bufCounter+1, 0,
+			sendto(globalSocketUDP, buf, bufCounter, 0,
 					(struct sockaddr*)&globalNodeAddrs[i], sizeof(globalNodeAddrs[i]));
 		}
 	}
@@ -105,13 +118,26 @@ void* broadcastToNeighbors(void* unusedParam) {
 			double time_diff = calcTimeDiff(globalLastHeartbeat[i], now);
 			if (graph[globalMyID][i] >= 0 && time_diff >= linkFailureMin) {
 				graph[globalMyID][i] = -1;
+				graph[i][globalMyID] = -1;
+				neighbors.erase(i);
 				neighborsChanged = true;
-			} else if (graph[globalMyID][i] == -1 && time_diff <= linkSuccessMax) {
+				fprintf(stderr, "LOSE CONNECTION WITH %hd\n", i);
+			} else if (graph[globalMyID][i] == -1 && time_diff < linkSuccessMax) {
 				graph[globalMyID][i] = givenIdsAndCosts[i];
+				graph[i][globalMyID] = givenIdsAndCosts[i];
+				neighbors.insert(i);
 				neighborsChanged = true;
+				fprintf(stderr, "FORM CONNECTION WITH %hd\n", i);
+			} else if (graph[globalMyID][i] >= 0 && neighbors.count(i) == 0) {
+				neighbors.insert(i);
+				neighborsChanged = true;
+				fprintf(stderr, "RECOGNIZE CONNECTION WITH %hd\n", i);
 			}
 		}
-		if (neighborsChanged) { sendBroadcast(); }
+		if (neighborsChanged) { 
+			printGraph();
+			sendBroadcast();
+		}
 		nanosleep(&sleepFor, 0);
 	}
 }
@@ -182,7 +208,7 @@ void listenForNeighbors()
 			// ...
 
 			//rishi
-			fprintf(stderr, "Received ping from manager.\n");
+			printGraph();
 			//rishi
 
 		}
@@ -199,7 +225,31 @@ void listenForNeighbors()
 		// ... 
 		//rishi
 		else if(!strncmp((const char*) recvBuf, "LSA", 3)) {
-			fprintf(stderr, "%hd: %s\n", globalMyID, recvBuf);
+			int bufCounter = 3;
+			
+			short int src_id;
+			int seq_num;
+			memcpy(&src_id, recvBuf+bufCounter, sizeof(short int)); bufCounter += sizeof(short int);
+			memcpy(&seq_num, recvBuf+bufCounter, sizeof(int)); bufCounter += sizeof(int);
+			fprintf(stderr, "%hd: src_id=%hd, seq_id=%d ", globalMyID, src_id, seq_num);
+
+			if (seq_num > seqNums[src_id]) {
+				seqNums[src_id] = seq_num;
+				for (int i = 0; i < MAX_NODES; i++) {
+					graph[src_id][i] = -1;
+					graph[i][src_id] = -1;
+				}
+				while (bufCounter < bytesRecvd) {
+					short int neighbor_id;
+					int cost;
+					memcpy(&neighbor_id, recvBuf+bufCounter, sizeof(short int)); bufCounter += sizeof(short int);
+					memcpy(&cost, recvBuf+bufCounter, sizeof(int)); bufCounter += sizeof(int);
+					graph[src_id][neighbor_id] = cost;
+					graph[neighbor_id][src_id] = cost;
+					fprintf(stderr, "/ %hd,%d ", neighbor_id, cost);
+				}
+				fprintf(stderr, "\n");
+			}
 		}
 
 		memset(recvBuf, 0, sizeof(recvBuf));

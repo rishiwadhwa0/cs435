@@ -25,8 +25,7 @@ FILE *theLogFile;
 int graph[256][256];
 int myNeighborGivenCosts[256];
 int givenIdsAndCosts[256];
-int lostSeqs[256];
-int formSeqs[256];
+int seqNums[256];
 //rishi
 
  
@@ -85,8 +84,7 @@ int main(int argc, char** argv)
 
 	//initialize seq #s to -1
 	for (int i = 0; i < MAX_NODES; i++) {
-		lostSeqs[i] = -1;
-		formSeqs[i] = -1;
+		seqNums[i] = -1;
 	}
 	//rishi
 	
