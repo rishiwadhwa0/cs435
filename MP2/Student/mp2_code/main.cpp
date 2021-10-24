@@ -111,11 +111,11 @@ int main(int argc, char** argv)
 	}
 	
 	//start threads... feel free to add your own, and to remove the provided ones.
-	pthread_t announcerThread, broadCastIfLinkFailureThread;
+	pthread_t announcerThread, broadcastThread;
 	pthread_create(&announcerThread, 0, announceToNeighbors, (void*)0);
 
 	//rishi
-	pthread_create(&broadCastIfLinkFailureThread, 0, broadcastIfLinkFailure, (void*)0);
+	pthread_create(&broadcastThread, 0, broadcastToNeighbors, (void*)0);
 	//rishi
 
 	//good luck, have fun!

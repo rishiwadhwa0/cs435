@@ -31,11 +31,10 @@ extern short int MAX_NODES;
 extern FILE *theLogFile;
 extern int graph[256][256];
 extern int givenIdsAndCosts[256];
-int linkFailureMax = 2000; //milliseconds
-int lostSeqNum = 0;
-int formSeqNum = 0;
-extern int lostSeqs[256];
-extern int formSeqs[256];
+int linkFailureMin = 2000; //milliseconds
+int linkSuccessMax = 1000; //milliseconds
+int seqNum = 0;
+extern int seqs[256];
 //rishi
 
 
@@ -51,9 +50,10 @@ void printGraph() {
     for (int i = 0; i < MAX_NODES; i++) {
 		bool firstTime = true;
         for (int j = 0; j < MAX_NODES; j++) {
-            if (graph[i][j] >= 0) {
+			int cost = graph[i][j];
+            if (cost >= 0) {
 				if (firstTime) { fprintf(stderr, "Node %d: ", globalMyID); firstTime = false; }
-				fprintf(stderr, "(%d, cost=%d) ", j, graph[i][j]);
+				fprintf(stderr, "(%d, cost=%d) ", j, cost);
 			}
         }
         if (!firstTime) { fprintf(stderr, "\n"); }
@@ -70,41 +70,51 @@ double calcTimeDiff(struct timeval x, struct timeval y) {
 	return diff / 1000; // return unit is milliseconds
 }
 
-void broadcastLost(short int neighbord_id) {
-	char buf[15];
-	sprintf(buf, "lost/%hd/%d/%hd", globalMyID, lostSeqNum, neighbord_id);
+void sendBroadcast() {
+	char buf[1000];
+	int bufCounter = 0;
+	bufCounter += sprintf(buf, "LSA%hd,%d", globalMyID, seqNum);
+	for (short int i = 0; i < MAX_NODES; i++) {
+		int cost = graph[globalMyID][i];
+		if (cost >= 0) {
+			bufCounter += sprintf(buf+bufCounter, "/%hd,%d", i, cost);
+		}
+	}
+
 	fprintf(stderr, "%s\n", buf);
-	// sendto(globalSocketUDP, buf, sizeof(buf), 0,
-	// 			  (struct sockaddr*)&globalNodeAddrs[neighbord_id], sizeof(globalNodeAddrs[neighbord_id]));
-	lostSeqNum++;
+
+	for (int i = 0; i < MAX_NODES; i++) {
+		if (graph[globalMyID][i] >= 0) {
+			sendto(globalSocketUDP, buf, bufCounter, 0,
+					(struct sockaddr*)&globalNodeAddrs[i], sizeof(globalNodeAddrs[i]));
+		}
+	}
+	
+	seqNum++;
 }
 
-void broadcastForm(short int neighbord_id, int cost) {
-	char buf[20];
-	sprintf(buf, "form/%hd/%d/%hd/%d", globalMyID, formSeqNum, neighbord_id, cost);
-	sendto(globalSocketUDP, buf, sizeof(buf), 0,
-				  (struct sockaddr*)&globalNodeAddrs[neighbord_id], sizeof(globalNodeAddrs[neighbord_id]));
-	formSeqNum++;
-}
-
-void* broadcastIfLinkFailure(void* unusedParam) {
+void* broadcastToNeighbors(void* unusedParam) {
 	struct timespec sleepFor;
-	sleepFor.tv_sec = 0;
-	sleepFor.tv_nsec = 1000 * 1000 * 1000; //1000 ms
+	sleepFor.tv_sec = 2;
+	sleepFor.tv_nsec = 0;
+	nanosleep(&sleepFor, 0);
 	while(1) {
-		bool linkFailure = false;
 		struct timeval now;
+		bool neighborsChanged = false;
 		for (short int i = 0; i < MAX_NODES; i++) {
-			if (graph[globalMyID][i] >= 0) {
-				gettimeofday(&now, 0);
-				double time_diff = calcTimeDiff(globalLastHeartbeat[i], now);
-				if (time_diff > linkFailureMax) {
-					graph[globalMyID][i] = -1;
-					linkFailure = true;
-					broadcastLost(i);
-				}
+			gettimeofday(&now, 0);
+			double time_diff = calcTimeDiff(globalLastHeartbeat[i], now);
+			if (graph[globalMyID][i] >= 0 && time_diff >= linkFailureMin) {
+				graph[globalMyID][i] = -1;
+				neighborsChanged = true;
+				fprintf(stderr, "LOST neighbor %hd\n", i);
+			} else if (graph[globalMyID][i] == -1 && time_diff <= linkSuccessMax) {
+				graph[globalMyID][i] = givenIdsAndCosts[i];
+				neighborsChanged = true;
+				fprintf(stderr, "FORM neighbor %hd\n", i);
 			}
 		}
+		if (neighborsChanged) { sendBroadcast(); }
 		nanosleep(&sleepFor, 0);
 	}
 }
@@ -165,13 +175,6 @@ void listenForNeighbors()
 
 			//record that we heard from heardFrom just now.
 			gettimeofday(&globalLastHeartbeat[heardFrom], 0);
-
-			//rishi
-			if (graph[globalMyID][heardFrom] == -1) {
-				graph[globalMyID][heardFrom] = givenIdsAndCosts[heardFrom];
-				broadcastForm(heardFrom, graph[globalMyID][heardFrom]);
-			}
-			//rishi
 		}
 		
 		//Is it a packet from the manager? (see mp2 specification for more details)
@@ -198,8 +201,8 @@ void listenForNeighbors()
 		//else if(!strncmp(recvBuf, "your other message types", ))
 		// ... 
 		//rishi
-		else if(!strncmp((const char*) recvBuf, "form", 4)) {
-			fprintf(stderr, "Received LSA: %s\n", recvBuf);
+		else if(!strncmp((const char*) recvBuf, "LSA", 3)) {
+			// fprintf(stderr, "%s\n", recvBuf);
 		}
 
 		memset(recvBuf, 0, sizeof(recvBuf));
