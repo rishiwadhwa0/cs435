@@ -72,6 +72,7 @@ double calcTimeDiff(struct timeval x, struct timeval y) {
 
 void sendBroadcast() {
 	char buf[1000];
+	memset(buf, 0, sizeof(buf));
 	int bufCounter = 0;
 	bufCounter += sprintf(buf, "LSA%hd,%d", globalMyID, seqNum);
 	for (short int i = 0; i < MAX_NODES; i++) {
@@ -80,8 +81,6 @@ void sendBroadcast() {
 			bufCounter += sprintf(buf+bufCounter, "/%hd,%d", i, cost);
 		}
 	}
-
-	fprintf(stderr, "%s\n", buf);
 
 	for (int i = 0; i < MAX_NODES; i++) {
 		if (graph[globalMyID][i] >= 0) {
@@ -107,11 +106,9 @@ void* broadcastToNeighbors(void* unusedParam) {
 			if (graph[globalMyID][i] >= 0 && time_diff >= linkFailureMin) {
 				graph[globalMyID][i] = -1;
 				neighborsChanged = true;
-				fprintf(stderr, "LOST neighbor %hd\n", i);
 			} else if (graph[globalMyID][i] == -1 && time_diff <= linkSuccessMax) {
 				graph[globalMyID][i] = givenIdsAndCosts[i];
 				neighborsChanged = true;
-				fprintf(stderr, "FORM neighbor %hd\n", i);
 			}
 		}
 		if (neighborsChanged) { sendBroadcast(); }
@@ -202,7 +199,7 @@ void listenForNeighbors()
 		// ... 
 		//rishi
 		else if(!strncmp((const char*) recvBuf, "LSA", 3)) {
-			// fprintf(stderr, "%s\n", recvBuf);
+			fprintf(stderr, "%s\n", recvBuf);
 		}
 
 		memset(recvBuf, 0, sizeof(recvBuf));
