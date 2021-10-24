@@ -84,7 +84,7 @@ void sendBroadcast() {
 
 	for (int i = 0; i < MAX_NODES; i++) {
 		if (graph[globalMyID][i] >= 0) {
-			sendto(globalSocketUDP, buf, bufCounter, 0,
+			sendto(globalSocketUDP, buf, bufCounter+1, 0,
 					(struct sockaddr*)&globalNodeAddrs[i], sizeof(globalNodeAddrs[i]));
 		}
 	}
@@ -199,7 +199,7 @@ void listenForNeighbors()
 		// ... 
 		//rishi
 		else if(!strncmp((const char*) recvBuf, "LSA", 3)) {
-			fprintf(stderr, "%s\n", recvBuf);
+			fprintf(stderr, "%hd: %s\n", globalMyID, recvBuf);
 		}
 
 		memset(recvBuf, 0, sizeof(recvBuf));
