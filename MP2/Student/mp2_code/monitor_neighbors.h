@@ -36,7 +36,7 @@ extern short int MAX_NODES;
 extern FILE *theLogFile;
 extern int graph[256][256];
 extern int givenIdsAndCosts[256];
-int linkFailureMin = 1000; //milliseconds
+int linkFailureMin = 2000; //milliseconds
 int linkSuccessMax = 1000; //milliseconds
 int seqNum = 0;
 extern int seqNums[256];
@@ -55,6 +55,7 @@ class Node {
 		}
 
 		bool operator<(const Node& other) const{
+			if (total_cost == other.total_cost) { return id > other.id; }
 			return total_cost > other.total_cost;
 		}
 
@@ -251,7 +252,7 @@ void listenForNeighbors()
 	char fromAddr[100];
 	struct sockaddr_in theirAddr;
 	socklen_t theirAddrLen;
-	unsigned char recvBuf[1000];
+	unsigned char recvBuf[10000];
 
 	int bytesRecvd;
 	while(1)
@@ -286,7 +287,7 @@ void listenForNeighbors()
 			// ...
 
 			//rishi
-			printGraph();
+			// printGraph();
 			short int dest_id = getNetOrderShort(recvBuf+4);
 			
 			if (dest_id == globalMyID) {
