@@ -11,6 +11,7 @@
 #include <pthread.h>
 
 //rishi
+#include <iostream>
 #include <sys/time.h>
 #include <set>
 #include <queue>
@@ -35,7 +36,7 @@ extern short int MAX_NODES;
 extern FILE *theLogFile;
 extern int graph[256][256];
 extern int givenIdsAndCosts[256];
-int linkFailureMin = 2000; //milliseconds
+int linkFailureMin = 1000; //milliseconds
 int linkSuccessMax = 1000; //milliseconds
 int seqNum = 0;
 extern int seqNums[256];
@@ -54,8 +55,7 @@ class Node {
 		}
 
 		bool operator<(const Node& other) const{
-			if (total_cost == other.total_cost) { return id < other.id; } 
-			return total_cost < other.total_cost;
+			return total_cost > other.total_cost;
 		}
 
 		bool operator==(const Node& other) const{
@@ -73,7 +73,7 @@ short int getNetOrderShort(unsigned char *buf) {
 }
 
 void printGraph() {
-	fprintf(stderr, "\nGRAPH START\n");
+	fprintf(stderr, "\nNode %hd: GRAPH START\n", globalMyID);
     for (short int i = 0; i < MAX_NODES; i++) {
 		bool firstTime = true;
         for (short int j = 0; j < MAX_NODES; j++) {
@@ -85,7 +85,7 @@ void printGraph() {
         }
         if (!firstTime) { fprintf(stderr, "\n"); }
     }
-	fprintf(stderr, "GRAPH END\n\n");
+	fprintf(stderr, "Node %hd: GRAPH END\n\n", globalMyID);
 }
 
 double calcTimeDiff(struct timeval x, struct timeval y) {
@@ -100,14 +100,6 @@ double calcTimeDiff(struct timeval x, struct timeval y) {
 void sendBroadcast() {
 	char buf[1000];
 	memset(buf, 0, sizeof(buf));
-	// int bufCounter = 0;
-	// bufCounter += sprintf(buf, "LSA%hd,%d", globalMyID, seqNum);
-	// for (short int i = 0; i < MAX_NODES; i++) {
-	// 	int cost = graph[globalMyID][i];
-	// 	if (cost >= 0) {
-	// 		bufCounter += sprintf(buf+bufCounter, "/%hd,%d", i, cost);
-	// 	}
-	// }
 	int bufCounter = 0;
 	memcpy(buf+bufCounter, "LSA", 3); bufCounter += 3;
 	memcpy(buf+bufCounter, &globalMyID, sizeof(short int)); bufCounter += sizeof(short int);
@@ -146,21 +138,21 @@ void* broadcastToNeighbors(void* unusedParam) {
 				graph[i][globalMyID] = -1;
 				neighbors.erase(i);
 				neighborsChanged = true;
-				fprintf(stderr, "LOSE CONNECTION WITH %hd\n", i);
+				// fprintf(stderr, "Node %hd: LOSE CONNECTION WITH %hd\n", globalMyID, i);
 			} else if (graph[globalMyID][i] == -1 && time_diff < linkSuccessMax) {
 				graph[globalMyID][i] = givenIdsAndCosts[i];
 				graph[i][globalMyID] = givenIdsAndCosts[i];
 				neighbors.insert(i);
 				neighborsChanged = true;
-				fprintf(stderr, "FORM CONNECTION WITH %hd\n", i);
+				// fprintf(stderr, "Node %hd: FORM CONNECTION WITH %hd\n", globalMyID, i);
 			} else if (graph[globalMyID][i] >= 0 && neighbors.count(i) == 0) {
 				neighbors.insert(i);
 				neighborsChanged = true;
-				fprintf(stderr, "RECOGNIZE CONNECTION WITH %hd\n", i);
+				// fprintf(stderr, "Node %hd: RECOGNIZE CONNECTION WITH %hd\n", globalMyID, i);
 			}
 		}
 		if (neighborsChanged) { 
-			printGraph();
+			// printGraph();
 			sendBroadcast();
 		}
 		nanosleep(&sleepFor, 0);
@@ -177,16 +169,14 @@ std::vector<short int> getNeighbors(short int id) {
 	return neighbors;
 }
 
-std::vector<short int> get_path(Node curr_node, std::map<short int, Node> explored_dict) {
-	std::vector<short int> path;
-	while (curr_node.parent_id != -1) {
-		path.insert(path.begin(), curr_node.id);
+short int get_next_hop(Node curr_node, std::map<short int, Node> explored_dict) {
+	while (curr_node.parent_id != globalMyID) {
 		curr_node = explored_dict.at(curr_node.parent_id);
 	}
-	return path;
+	return curr_node.id;
 }
 
-std::vector<short int> Dijkstra(int dest_id) {
+short int Dijkstra(int dest_id) {
 	Node start_node(globalMyID, 0, -1);
 	std::priority_queue<Node> frontier; std::set<short int> frontier_set;
 	std::map<short int, Node> explored_dict;
@@ -197,29 +187,37 @@ std::vector<short int> Dijkstra(int dest_id) {
 		Node current_node = frontier.top(); frontier.pop(); frontier_set.erase(current_node.id);
 
 		if (current_node.id == dest_id) {
-			return get_path(current_node, explored_dict);
+			// for(const auto& elem : explored_dict) {
+			// 	std::cout << elem.first << ": id=" << elem.second.id << " total_cost=" << elem.second.total_cost << " parent_id=" << elem.second.parent_id << "\n";
+			// }
+			return get_next_hop(current_node, explored_dict);
 		}
 
 		std::vector<short int> neighbors = getNeighbors(current_node.id);
 		for (short int neighbor : neighbors) {
 			Node n(neighbor, current_node.total_cost + graph[current_node.id][neighbor], current_node.id);
-			if (explored_dict.count(neighbor) == 0) {
+			if (explored_dict.count(n.id) == 0) {
 				frontier.push(n); frontier_set.insert(n.id);
 				explored_dict.insert({n.id, n});
-			} else if (frontier_set.count(neighbor)) {
-				Node stored_node = explored_dict.at(neighbor);
+			} else if (frontier_set.count(n.id)) {
+				Node stored_node = explored_dict.at(n.id);
 				int stored_cost = stored_node.total_cost;
-				int current_cost = current_node.total_cost + graph[current_node.id][neighbor];
-				if ((current_cost < stored_cost) ||
-					(current_cost == stored_cost && current_node.id < stored_node.parent_id)) {
+				int current_cost = n.total_cost;
+				if (current_cost == stored_cost) {
+					short int stored_next_hop = get_next_hop(stored_node, explored_dict);
+					short int current_next_hop = get_next_hop(current_node, explored_dict);
+					if (current_next_hop < stored_next_hop) {
+						frontier.push(n); frontier_set.insert(n.id);
+						explored_dict.erase(n.id); explored_dict.insert({n.id, n});
+					}
+				} else if (current_cost < stored_cost) {
 					frontier.push(n); frontier_set.insert(n.id);
-					explored_dict.insert({n.id, n}); 
+					explored_dict.erase(n.id); explored_dict.insert({n.id, n}); 
 				}
 			}
 		}
 	}
-	std::vector<short int> emptyPath;
-	return emptyPath;
+	return -1;
 }
 //rishi
 
@@ -288,29 +286,29 @@ void listenForNeighbors()
 			// ...
 
 			//rishi
+			printGraph();
 			short int dest_id = getNetOrderShort(recvBuf+4);
 			
 			if (dest_id == globalMyID) {
-				fprintf(stderr, "%hd: receive packet message %s\n", globalMyID, recvBuf+4+sizeof(short int));
+				fprintf(stderr, "Node %hd: receive packet message %s\n", globalMyID, recvBuf+4+sizeof(short int));
 				fprintf(theLogFile, "receive packet message %s\n", recvBuf+4+sizeof(short int));
 				fflush(theLogFile);
 			} else {
-				std::vector<short int> path = Dijkstra(dest_id);
-				if (path.size()) {
-					for (short int id : path) { fprintf(stderr, "-> %hd ", id); }
-					fprintf(stderr, "\n");
-					short int next_hop_id = path.front();
+				short int next_hop_id = Dijkstra(dest_id);
+				if (next_hop_id != -1) {
 					if (heardFrom == -1) {
+						fprintf(stderr, "Node %hd: sending packet dest %d nexthop %d message %s\n", globalMyID, dest_id, next_hop_id, recvBuf+4+sizeof(short int));
 						fprintf(theLogFile, "sending packet dest %d nexthop %d message %s\n", dest_id, next_hop_id, recvBuf+4+sizeof(short int));
 						fflush(theLogFile);
 					} else {
+						fprintf(stderr, "Node %hd: forward packet dest %d nexthop %d message %s\n", globalMyID, dest_id, next_hop_id, recvBuf+4+sizeof(short int));
 						fprintf(theLogFile, "forward packet dest %d nexthop %d message %s\n", dest_id, next_hop_id, recvBuf+4+sizeof(short int));
 						fflush(theLogFile);
 					}
 					sendto(globalSocketUDP, recvBuf, bytesRecvd, 0,
 							(struct sockaddr*)&globalNodeAddrs[next_hop_id], sizeof(globalNodeAddrs[next_hop_id]));
 				} else {
-					fprintf(stderr, "%hd: unreachable dest %d\n", globalMyID, dest_id);
+					fprintf(stderr, "Node %hd: unreachable dest %d\n", globalMyID, dest_id);
 					fprintf(theLogFile, "unreachable dest %d\n", dest_id);
 					fflush(theLogFile);
 				}
@@ -337,7 +335,7 @@ void listenForNeighbors()
 			int seq_num;
 			memcpy(&src_id, recvBuf+bufCounter, sizeof(short int)); bufCounter += sizeof(short int);
 			memcpy(&seq_num, recvBuf+bufCounter, sizeof(int)); bufCounter += sizeof(int);
-			fprintf(stderr, "%hd: heardFrom=%hd, src_id=%hd, seq_id=%d ", globalMyID, heardFrom, src_id, seq_num);
+			// fprintf(stderr, "%hd: heardFrom=%hd, src_id=%hd, seq_id=%d ", globalMyID, heardFrom, src_id, seq_num);
 
 			if (seq_num > seqNums[src_id]) {
 				seqNums[src_id] = seq_num;
@@ -357,9 +355,9 @@ void listenForNeighbors()
 					memcpy(&cost, recvBuf+bufCounter, sizeof(int)); bufCounter += sizeof(int);
 					graph[src_id][neighbor_id] = cost;
 					graph[neighbor_id][src_id] = cost;
-					fprintf(stderr, "/ %hd,%d ", neighbor_id, cost);
+					// fprintf(stderr, "/ %hd,%d ", neighbor_id, cost);
 				}
-				fprintf(stderr, "\n");
+				// fprintf(stderr, "\n");
 
 				for (short int i = 0; i < MAX_NODES; i++) {
 					if (i != globalMyID && i != heardFrom) {
@@ -368,10 +366,10 @@ void listenForNeighbors()
 					}
 				}
 
-				if (memcmp(&copy_graph, &graph, sizeof(graph)) != 0) { sendBroadcast(); }
+				// if (memcmp(&copy_graph, &graph, sizeof(graph)) != 0) { sendBroadcast(); }
 
 			} else {
-				fprintf(stderr, " [DISCARD]\n");
+				// fprintf(stderr, " [DISCARD]\n");
 			}
 		}
 
