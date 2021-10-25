@@ -183,7 +183,6 @@ std::vector<short int> get_path(Node curr_node, std::map<short int, Node> explor
 		path.insert(path.begin(), curr_node.id);
 		curr_node = explored_dict.at(curr_node.parent_id);
 	}
-	path.insert(path.begin(), curr_node.id);
 	return path;
 }
 
@@ -290,9 +289,32 @@ void listenForNeighbors()
 
 			//rishi
 			short int dest_id = getNetOrderShort(recvBuf+4);
-			std::vector<short int> path = Dijkstra(dest_id);
-			for (short int id : path) { fprintf(stderr, "-> %hd ", id); }
-			fprintf(stderr, "\n");
+			
+			if (dest_id == globalMyID) {
+				fprintf(stderr, "%hd: receive packet message %s\n", globalMyID, recvBuf+4+sizeof(short int));
+				fprintf(theLogFile, "receive packet message %s\n", recvBuf+4+sizeof(short int));
+				fflush(theLogFile);
+			} else {
+				std::vector<short int> path = Dijkstra(dest_id);
+				if (path.size()) {
+					for (short int id : path) { fprintf(stderr, "-> %hd ", id); }
+					fprintf(stderr, "\n");
+					short int next_hop_id = path.front();
+					if (heardFrom == -1) {
+						fprintf(theLogFile, "sending packet dest %d nexthop %d message %s\n", dest_id, next_hop_id, recvBuf+4+sizeof(short int));
+						fflush(theLogFile);
+					} else {
+						fprintf(theLogFile, "forward packet dest %d nexthop %d message %s\n", dest_id, next_hop_id, recvBuf+4+sizeof(short int));
+						fflush(theLogFile);
+					}
+					sendto(globalSocketUDP, recvBuf, bytesRecvd, 0,
+							(struct sockaddr*)&globalNodeAddrs[next_hop_id], sizeof(globalNodeAddrs[next_hop_id]));
+				} else {
+					fprintf(stderr, "%hd: unreachable dest %d\n", globalMyID, dest_id);
+					fprintf(theLogFile, "unreachable dest %d\n", dest_id);
+					fflush(theLogFile);
+				}
+			}
 			//rishi
 
 		}
