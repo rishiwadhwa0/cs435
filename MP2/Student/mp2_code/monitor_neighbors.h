@@ -13,6 +13,9 @@
 //rishi
 #include <sys/time.h>
 #include <set>
+#include <queue>
+#include <map>
+#include <vector>
 //rishi
 
 
@@ -37,6 +40,28 @@ int linkSuccessMax = 1000; //milliseconds
 int seqNum = 0;
 extern int seqNums[256];
 std::set<int> neighbors;
+
+class Node {
+	public:
+		short int id;
+		int total_cost;
+		short int parent_id;
+
+		Node(short int setId, int setTotalCost, short int setParentId) {
+			id = setId;
+			total_cost = setTotalCost;
+			parent_id = setParentId;
+		}
+
+		bool operator<(const Node& other) const{
+			if (total_cost == other.total_cost) { return id < other.id; } 
+			return total_cost < other.total_cost;
+		}
+
+		bool operator==(const Node& other) const{
+			return id == other.id && total_cost == other.total_cost && parent_id == other.parent_id;
+		}
+};
 //rishi
 
 
@@ -141,6 +166,62 @@ void* broadcastToNeighbors(void* unusedParam) {
 		nanosleep(&sleepFor, 0);
 	}
 }
+
+std::vector<short int> getNeighbors(short int id) {
+	std::vector<short int> neighbors;
+	for (short int i = 0; i < MAX_NODES; i++) {
+		if (i != id && graph[id][i] >= 0) {
+			neighbors.push_back(i);
+		}
+	}
+	return neighbors;
+}
+
+std::vector<short int> get_path(Node curr_node, std::map<short int, Node> explored_dict) {
+	std::vector<short int> path;
+	while (curr_node.parent_id != -1) {
+		path.insert(path.begin(), curr_node.id);
+		curr_node = explored_dict.at(curr_node.parent_id);
+	}
+	path.insert(path.begin(), curr_node.id);
+	return path;
+}
+
+std::vector<short int> Dijkstra(int dest_id) {
+	Node start_node(globalMyID, 0, -1);
+	std::priority_queue<Node> frontier; std::set<short int> frontier_set;
+	std::map<short int, Node> explored_dict;
+
+	frontier.push(start_node); frontier_set.insert(start_node.id);
+	explored_dict.insert({start_node.id, start_node});
+	while (!frontier.empty()) {
+		Node current_node = frontier.top(); frontier.pop(); frontier_set.erase(current_node.id);
+
+		if (current_node.id == dest_id) {
+			return get_path(current_node, explored_dict);
+		}
+
+		std::vector<short int> neighbors = getNeighbors(current_node.id);
+		for (short int neighbor : neighbors) {
+			Node n(neighbor, current_node.total_cost + graph[current_node.id][neighbor], current_node.id);
+			if (explored_dict.count(neighbor) == 0) {
+				frontier.push(n); frontier_set.insert(n.id);
+				explored_dict.insert({n.id, n});
+			} else if (frontier_set.count(neighbor)) {
+				Node stored_node = explored_dict.at(neighbor);
+				int stored_cost = stored_node.total_cost;
+				int current_cost = current_node.total_cost + graph[current_node.id][neighbor];
+				if ((current_cost < stored_cost) ||
+					(current_cost == stored_cost && current_node.id < stored_node.parent_id)) {
+					frontier.push(n); frontier_set.insert(n.id);
+					explored_dict.insert({n.id, n}); 
+				}
+			}
+		}
+	}
+	std::vector<short int> emptyPath;
+	return emptyPath;
+}
 //rishi
 
 
@@ -208,7 +289,10 @@ void listenForNeighbors()
 			// ...
 
 			//rishi
-			printGraph();
+			short int dest_id = getNetOrderShort(recvBuf+4);
+			std::vector<short int> path = Dijkstra(dest_id);
+			for (short int id : path) { fprintf(stderr, "-> %hd ", id); }
+			fprintf(stderr, "\n");
 			//rishi
 
 		}
