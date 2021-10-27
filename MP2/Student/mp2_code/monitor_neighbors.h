@@ -55,7 +55,7 @@ class Node {
 		}
 
 		bool operator<(const Node& other) const{
-			if (total_cost == other.total_cost) { return id > other.id; }
+			// if (total_cost == other.total_cost) { return id > other.id; }
 			return total_cost > other.total_cost;
 		}
 
@@ -170,7 +170,9 @@ std::vector<short int> getNeighbors(short int id) {
 	return neighbors;
 }
 
-short int get_next_hop(Node curr_node, std::map<short int, Node> explored_dict) {
+short int get_next_hop(Node curr_node, std::map<short int, Node> explored_dict, bool use_explored_dict = false) {
+	if (use_explored_dict) { curr_node = explored_dict.at(curr_node.id); }
+
 	while (curr_node.parent_id != globalMyID) {
 		curr_node = explored_dict.at(curr_node.parent_id);
 	}
@@ -178,6 +180,9 @@ short int get_next_hop(Node curr_node, std::map<short int, Node> explored_dict) 
 }
 
 short int Dijkstra(int dest_id) {
+	int improved_counter = 0;
+	short int return_next_hop = -1;
+
 	Node start_node(globalMyID, 0, -1);
 	std::priority_queue<Node> frontier; std::set<short int> frontier_set;
 	std::map<short int, Node> explored_dict;
@@ -191,7 +196,12 @@ short int Dijkstra(int dest_id) {
 			// for(const auto& elem : explored_dict) {
 			// 	std::cout << elem.first << ": id=" << elem.second.id << " total_cost=" << elem.second.total_cost << " parent_id=" << elem.second.parent_id << "\n";
 			// }
-			return get_next_hop(current_node, explored_dict);
+
+			// return get_next_hop(current_node, explored_dict);
+
+			return_next_hop = get_next_hop(current_node, explored_dict, true);
+			// // fprintf(stderr, "Node %hd: return_next_hop=%hd\n", globalMyID, return_next_hop);
+			if (improved_counter == 1) { return return_next_hop; }
 		}
 
 		std::vector<short int> neighbors = getNeighbors(current_node.id);
@@ -208,6 +218,7 @@ short int Dijkstra(int dest_id) {
 					short int stored_next_hop = get_next_hop(stored_node, explored_dict);
 					short int current_next_hop = get_next_hop(current_node, explored_dict);
 					if (current_next_hop < stored_next_hop) {
+						if (n.id == dest_id) { improved_counter++; }
 						frontier.push(n); frontier_set.insert(n.id);
 						explored_dict.erase(n.id); explored_dict.insert({n.id, n});
 					}
@@ -218,7 +229,9 @@ short int Dijkstra(int dest_id) {
 			}
 		}
 	}
-	return -1;
+	
+	// return -1;
+	return return_next_hop;
 }
 //rishi
 
@@ -330,6 +343,7 @@ void listenForNeighbors()
 		// ... 
 		//rishi
 		else if(!strncmp((const char*) recvBuf, "LSA", 3)) {
+			// printGraph();
 			int bufCounter = 3;
 			
 			short int src_id;
@@ -341,8 +355,8 @@ void listenForNeighbors()
 			if (seq_num > seqNums[src_id]) {
 				seqNums[src_id] = seq_num;
 
-				int copy_graph[256][256];
-				memcpy(&copy_graph, &graph, sizeof(graph));
+				// int copy_graph[256][256];
+				// memcpy(&copy_graph, &graph, sizeof(graph));
 				
 				for (int i = 0; i < MAX_NODES; i++) {
 					graph[src_id][i] = -1;

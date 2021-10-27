@@ -1,0 +1,3 @@
+unreachable dest 0
+sending packet dest 0 nexthop 4 message eureka!
+unreachable dest 0
